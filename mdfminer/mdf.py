@@ -403,6 +403,68 @@ def _interpret_ce_block(data,vers=3.0,bord='little'):
                     "name_of_sender":snd_name,
                     })
     return ret
+
+
+def _interpret_record(rec,chs,bord):
+    vals = []
+    for ch in chs:
+        bit_offset = ch.get_bit_offset()
+        bit_size = ch.get_bit_size()
+        byte_offset = ch.get_byte_offset()#did not find any program that actually uses this
+        if byte_offset:
+            raise NotImplementedError("byte_offset {0} is set but not used".format(byte_offset))
+        signal_type = ch.get_signal_type()
+        if bit_offset%8:
+            raise NotImplementedError("bit_offset cannot be divided by 8")
+        offset = int(bit_offset/8)
+        if bit_size%8:
+            raise NotImplementedError("bit_size cannot be divided by 8")
+        size = int(bit_size/8)
+        sig_data = rec[offset:offset+size]
+        if signal_type == 0:
+            #unsigned integer
+            fmt = "I"
+            if bord == 'little':
+                fmtprefix = '<'
+                sig_data_just = sig_data.ljust(4,b'\x00')
+            else:
+                fmtprefix = '>'
+                sig_data_just = sig_data.rjust(4,b'\x00')
+            val = struct.unpack("{0}{1}".format(fmtprefix,fmt),sig_data_just)[0]
+        elif signal_type == 1:
+            #signed integer
+            fmt = "i"
+            if bord == 'little':
+                fmtprefix = '<'
+                sig_data_just = sig_data.ljust(4,b'\x00')
+            else:
+                fmtprefix = '>'
+                sig_data_just = sig_data.rjust(4,b'\x00')
+            val = struct.unpack("{0}{1}".format(fmtprefix,fmt),sig_data_just)[0]
+        elif signal_type == 3:
+            #float64, e.g. double
+            fmt = "d"
+            if bord == 'little':
+                fmtprefix = '<'
+                sig_data_just = sig_data.ljust(8,b'\x00')#just trying
+            else:
+                fmtprefix = '>'
+                sig_data_just = sig_data.rjust(8,b'\x00')
+            val = struct.unpack("{0}{1}".format(fmtprefix,fmt),sig_data_just)[0]
+        elif signal_type == 7:
+            #string
+            val = sig_data.rstrip(b'\x00').decode()
+        else:
+            raise NotImplementedError("unhandled {0}".format(signal_type))
+        conversion_formula = ch.get_conversion_formula()
+        if conversion_formula != None:
+            phy_val = conversion_formula(val)
+        else:
+            phy_val = val
+        if ch.get_channel_type() == "time":
+            phy_val = datetime.timedelta(seconds=phy_val)
+        vals.append(phy_val)
+    return vals
     
 
 class mdf_block():
@@ -571,12 +633,12 @@ class hd_block(mdf_block):
                 return ch
         return None
 
-    def get_records_with_timestamp(self,short_names,useabsolutetime=False):
+    def get_records_with_timestamp(self,fobj,short_names,useabsolutetime=False):
         for dg in self.get_data_groups():
             if useabsolutetime:
-                recs = dg.get_records_with_timestamp(short_names=short_names,starttime=self.timestamp)
+                recs = dg.get_records_with_timestamp(fobj=fobj,short_names=short_names,starttime=self.timestamp)
             else:
-                recs = dg.get_records_with_timestamp(short_names=short_names)
+                recs = dg.get_records_with_timestamp(fobj=fobj,short_names=short_names)
             if recs:
                 return recs
         return None
@@ -642,7 +704,7 @@ class dg_block(mdf_block):
         self.channel_groups = []
         chgb_ptr = self.block_data.pop("first_channel_group_pointer")
         while chgb_ptr > 0:
-            chgb = cg_block(fobj=fobj,vers=vers,bord=bord,foffset=chgb_ptr,ignore_channels=self.ignore_channels)
+            chgb = cg_block(fobj=fobj,vers=vers,bord=bord,foffset=chgb_ptr,ignore_channels=self.ignore_channels,parent=self)
             self.channel_groups.append(chgb)
             chgb_ptr = chgb.block_data.pop("next_channel_group_pointer")
         #self.channel_groups.sort(key = lambda x: x.record_id)
@@ -659,7 +721,8 @@ class dg_block(mdf_block):
         self.data_block_ptr = self.block_data.pop("data_block_pointer")
         self.number_of_record_ids = self.block_data.pop("number_of_record_ids")
 
-        self.raw_data_to_signal_list(fobj=fobj,bord=bord,timestamp=timestamp,ignore_channels=ignore_channels)
+        #dont convert binary block yet - only convert the binary record that is asked in generator later...
+        #self.raw_data_to_signal_list(fobj=fobj,bord=bord,timestamp=timestamp,ignore_channels=ignore_channels)
 
     def get_channel_groups(self):
         return self.channel_groups
@@ -689,91 +752,36 @@ class dg_block(mdf_block):
     
     def __str__(self):
         return("Data Block with Raw Data at address {0:08X}".format(self.data_block_ptr))
+
+    def get_data_block_ptr(self):
+        return self.data_block_prt
             
-    def raw_data_to_signal_list(self,fobj,bord,timestamp,printdebug=False,ignore_channels=[]):
-        #listofunhandledsignals = []
-        fobj.seek(self.data_block_ptr)
-        for chg in self.get_channel_groups():
-            ignore_it = False
-            for icg in ignore_channels:
-                #ignore channels that do nothing
-                if str(chg).startswith(icg):
-                    ignore_it = True
-                    break
-            if not ignore_it:
-                rec_size = chg.get_record_size()
-                chs = chg.get_channels()
-                rec_num = chg.get_number_of_records()
-                if printdebug:
-                    print("Channel Group: {0}\nNumber of Channels: {1}\nNumber of Records {2}".format(chg,len(chs),rec_num))
-                    print("\n".join(["Channel: {0} Type: {1}".format(ch.short_signal_name,ch.channel_type) for ch in chs]))
-                    
-                recs = []
-                for rec_idx in range(rec_num):
-                    rec = bytearray(fobj.read(rec_size))
-                    vals = []
-                    for ch in chs:
-                        bit_offset = ch.get_bit_offset()
-                        bit_size = ch.get_bit_size()
-                        byte_offset = ch.get_byte_offset()#did not find any program that actually uses this
-                        if byte_offset:
-                            raise NotImplementedError("byte_offset {0} is set but not used".format(byte_offset))
-                        signal_type = ch.get_signal_type()
-                        if bit_offset%8:
-                            raise NotImplementedError("bit_offset cannot be divided by 8")
-                        offset = int(bit_offset/8)
-                        if bit_size%8:
-                            raise NotImplementedError("bit_size cannot be divided by 8")
-                        size = int(bit_size/8)
-                        sig_data = rec[offset:offset+size]
-                        if signal_type == 0:
-                            #unsigned integer
-                            fmt = "I"
-                            if bord == 'little':
-                                fmtprefix = '<'
-                                sig_data_just = sig_data.ljust(4,b'\x00')
-                            else:
-                                fmtprefix = '>'
-                                sig_data_just = sig_data.rjust(4,b'\x00')
-                            val = struct.unpack("{0}{1}".format(fmtprefix,fmt),sig_data_just)[0]
-                        elif signal_type == 1:
-                            #signed integer
-                            fmt = "i"
-                            if bord == 'little':
-                                fmtprefix = '<'
-                                sig_data_just = sig_data.ljust(4,b'\x00')
-                            else:
-                                fmtprefix = '>'
-                                sig_data_just = sig_data.rjust(4,b'\x00')
-                            val = struct.unpack("{0}{1}".format(fmtprefix,fmt),sig_data_just)[0]
-                        elif signal_type == 3:
-                            #float64, e.g. double
-                            fmt = "d"
-                            if bord == 'little':
-                                fmtprefix = '<'
-                                sig_data_just = sig_data.ljust(8,b'\x00')#just trying
-                            else:
-                                fmtprefix = '>'
-                                sig_data_just = sig_data.rjust(8,b'\x00')
-                            val = struct.unpack("{0}{1}".format(fmtprefix,fmt),sig_data_just)[0]
-                        elif signal_type == 7:
-                            #string
-                            val = sig_data.rstrip(b'\x00').decode()
-                        else:
-                            raise NotImplementedError("unhandled {0}".format(signal_type))
-                        
-                        conversion_formula = ch.get_conversion_formula()
-                        if conversion_formula != None:
-                            phy_val = conversion_formula(val)
-                        else:
-                            phy_val = val
-                        if ch.get_channel_type() == "time":
-                            phy_val = datetime.timedelta(seconds=phy_val)
-                        vals.append(phy_val)
-                    
-                    recs.append(vals)
-                chg.set_records(recs)
-        return
+#     def raw_data_to_signal_list(self,fobj,bord,timestamp,printdebug=False,ignore_channels=[]):
+#         fobj.seek(self.data_block_ptr)
+#         for chg in self.get_channel_groups():
+#             ignore_it = False
+#             for icg in ignore_channels:
+#                 #ignore channels that do nothing
+#                 if str(chg).startswith(icg):
+#                     ignore_it = True
+#                     break
+#             if not ignore_it:
+#                 rec_size = chg.get_record_size()
+#                 chs = chg.get_channels()
+#                 rec_num = chg.get_number_of_records()
+#                 if printdebug:
+#                     print("Channel Group: {0}\nNumber of Channels: {1}\nNumber of Records {2}".format(chg,len(chs),rec_num))
+#                     print("\n".join(["Channel: {0} Type: {1}".format(ch.short_signal_name,ch.channel_type) for ch in chs]))
+#                     
+#                 recs = []
+#                 #this is the part where data extraction starts
+#                 for rec_idx in range(rec_num):
+#                     rec = bytearray(fobj.read(rec_size))
+#                     vals = _interpret_record(rec=rec,chs=chs,bord=bord)                    
+#                     recs.append(vals)
+#                 #this would be the end of the functional part
+#                 chg.set_records(recs)
+#         return
     
     def get_channel_short_names(self,ignore_channels=None):
         if ignore_channels == None:
@@ -809,10 +817,10 @@ class dg_block(mdf_block):
                 return ch
         return None
 
-    def get_records_with_timestamp(self,short_names,starttime=None):
+    def get_records_with_timestamp(self,fobj,short_names,starttime=None):
         for cg in self.get_channel_groups():
             #print(cg)
-            recs = cg.get_records_with_timestamp(short_names=short_names,starttime=starttime)
+            recs = cg.get_records_with_timestamp(fobj,foffset=self.data_block_ptr,short_names=short_names,starttime=starttime)
             if recs:
                 return recs
         return None
@@ -820,7 +828,7 @@ class dg_block(mdf_block):
             
 class cg_block(mdf_block):
     
-    def __init__(self,fobj,foffset,vers,bord,ignore_channels=[],*args,**kwargs):
+    def __init__(self,fobj,foffset,vers,bord,parent,ignore_channels=[],*args,**kwargs):
         """
         channel group block in the mdf file
         @param fobj: the file object
@@ -835,6 +843,7 @@ class cg_block(mdf_block):
         self.block_data.update(_interpret_cg_block(data=self.data,vers=vers,bord=bord))
 
         self.ignore_channels = ignore_channels#needed to filter out INCA related program SPAM
+        self.parent=parent
         self.records = []
         self.channels = []
         self.time_channel_idx = None
@@ -907,8 +916,12 @@ class cg_block(mdf_block):
             if chsn.startswith(q):
                 return chsn
         return None
-        
-    def get_records_with_timestamp(self,short_names=None,starttime=None):
+    
+    #this function needs to implement the binary data transformation    
+    def get_records_with_timestamp(self,fobj,foffset,short_names=None,starttime=None):
+        rec_size = self.get_record_size()
+        chs = self.get_channels()
+        rec_num = self.get_number_of_records()
         #generator
         channel_names = []
         channel_idxs = []
@@ -933,16 +946,31 @@ class cg_block(mdf_block):
         #prepared list of names and list of indexes
                 
         time_channel_index = self.get_time_channel_index()
-        for i in range(self.get_number_of_records()):
-            this_record_dict = {}
-            for chname,chidx in zip(channel_names,channel_idxs):
-                this_record_dict.update({chname:self.records[i][chidx]})
-                
-            if starttime:
-                rec = {self.records[i][time_channel_index]+starttime:this_record_dict}
-            else:
-                rec = {self.records[i][time_channel_index]:this_record_dict}
-            yield rec
+        
+        
+        if foffset:
+            fobj.seek(foffset)
+            for rec_idx in range(rec_num):
+                rec = bytearray(fobj.read(rec_size))
+                vals = _interpret_record(rec=rec,chs=chs,bord=self.bord)
+                timestamp = vals.pop(time_channel_index)
+                ret = {timestamp:vals}
+                yield ret 
+        else:
+            return None
+        
+        
+#         for i in range(self.get_number_of_records()):
+#             this_record_dict = {}
+#             for chname,chidx in zip(channel_names,channel_idxs):
+#                 this_record_dict.update({chname:self.records[i][chidx]})
+#                 
+#             if starttime:
+#                 rec = {self.records[i][time_channel_index]+starttime:this_record_dict}
+#             else:
+#                 rec = {self.records[i][time_channel_index]:this_record_dict}
+#             yield rec
+
 
     def channel_in_group(self,short_name):
         if self.get_channel_by_short_name(short_name=short_name):
@@ -1195,8 +1223,9 @@ class mdf():
         """
         self.idblock = None
         self.hdblock = None
-        if fname:
-            self.read_mdf_file(fname=fname,ignore_channels=ignore_channels)
+        self.fname = fname
+        if self.fname:
+            self.read_mdf_file(fname=self.fname,ignore_channels=ignore_channels)
 
 
     def read_mdf_file(self,fname,ignore_channels):
@@ -1221,7 +1250,9 @@ class mdf():
         return self.hdblock.get_channel_by_short_name(short_name=short_name)
 
     def get_records_with_timestamp(self,short_names=None,useabsolutetime=False):
-        return self.hdblock.get_records_with_timestamp(short_names=short_names,useabsolutetime=useabsolutetime)
+        with open(self.fname,'rb') as f:
+            #open the file again to retreive the records
+            return self.hdblock.get_records_with_timestamp(fobj=f,short_names=short_names,useabsolutetime=useabsolutetime)
 
 
     def to_csv_file(self,fname,useabsolutetime=False,csv_sep=",",line_sep=";\n"):
@@ -1234,6 +1265,44 @@ class mdf():
                 for timestamp in record:
                     thisrecord = record[timestamp]
                     f.write(str(timestamp)+csv_sep+csv_sep.join([str(thisrecord[chan]) for chan in chans])+line_sep)
+        return
+                        
+    def to_xlsx_file(self,fname,useabsolutetime=False):
+        from openpyxl import Workbook
+        from openpyxl.chart import (
+                                    LineChart,
+                                    Reference,
+                                    )
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "data"
+        row = ["time",]
+        chans = self.get_channel_short_names()
+        col_idx = len(chans)+1
+        row.extend(chans)
+        ws.append(row)
+        records = self.get_records_with_timestamp(useabsolutetime=useabsolutetime)
+        row_idx = 1
+        for record in records:
+            for timestamp in record:
+                thisrecord = record[timestamp]
+                row = [timestamp,]
+                row.extend([thisrecord[chan] for chan in chans])
+                ws.append(row)
+                row_idx += 1
+        
+        c1 = LineChart()
+        c1.title = "Line Chart"
+        c1.style = 13
+        c1.y_axis.title = 'Value'
+        c1.x_axis.title = 'Record'
+
+        print(col_idx,row_idx)
+        data = Reference(ws, min_col=2, min_row=1, max_col=col_idx, max_row=row_idx)
+        c1.add_data(data, titles_from_data=True)
+        ws2 = wb.create_sheet("Chart")
+        ws2.add_chart(c1, "A1")
+        wb.save(fname)
         return
                         
 
@@ -1260,21 +1329,24 @@ class mdf():
 
 def selftest(testmode="read_mdf",fname="test.mdf"):
     if testmode == "mdf2csv":
-        #a convenience test function
         a = mdf(fname=fname)
         c = fname[:-3] + "csv" 
-        a.to_csv_file(c,useabsolutetime=True,csv_sep=";",line_sep="\n")
+        a.to_csv_file(c,useabsolutetime=True)
+    elif testmode == "mdf2xlsx":
+        a = mdf(fname=fname)
+        c = fname[:-3] + "xlsx" 
+        a.to_xlsx_file(c,useabsolutetime=True)
+        
 
     return
 
 if __name__ == "__main__":
     from optparse import OptionParser
     parser = OptionParser()
-    parser.add_option("-c", "--command", dest="command", default="mdf2csv",
+    parser.add_option("-c", "--command", dest="command", default="mdf2xlsx",
                       help="COMMAND to execute", metavar="COMMAND")
     parser.add_option("-f", "--file", dest="fname", default="recorder1-001.mdf",
                       help="FILE to use", metavar="FILE")    
     (options, args) = parser.parse_args()
  
     selftest(testmode = options.command,fname=options.fname)
-
