@@ -633,12 +633,12 @@ class hd_block(mdf_block):
                 return ch
         return None
 
-    def get_records_with_timestamp(self,fobj,short_names,useabsolutetime=False):
+    def get_records_with_timestamp(self,fname,short_names,useabsolutetime=False):
         for dg in self.get_data_groups():
             if useabsolutetime:
-                recs = dg.get_records_with_timestamp(fobj=fobj,short_names=short_names,starttime=self.timestamp)
+                recs = dg.get_records_with_timestamp(fname=fname,short_names=short_names,starttime=self.timestamp)
             else:
-                recs = dg.get_records_with_timestamp(fobj=fobj,short_names=short_names)
+                recs = dg.get_records_with_timestamp(fname=fname,short_names=short_names)
             if recs:
                 return recs
         return None
@@ -704,7 +704,7 @@ class dg_block(mdf_block):
         self.channel_groups = []
         chgb_ptr = self.block_data.pop("first_channel_group_pointer")
         while chgb_ptr > 0:
-            chgb = cg_block(fobj=fobj,vers=vers,bord=bord,foffset=chgb_ptr,ignore_channels=self.ignore_channels,parent=self)
+            chgb = cg_block(fobj=fobj,vers=vers,bord=bord,foffset=chgb_ptr,ignore_channels=self.ignore_channels)
             self.channel_groups.append(chgb)
             chgb_ptr = chgb.block_data.pop("next_channel_group_pointer")
         #self.channel_groups.sort(key = lambda x: x.record_id)
@@ -817,10 +817,10 @@ class dg_block(mdf_block):
                 return ch
         return None
 
-    def get_records_with_timestamp(self,fobj,short_names,starttime=None):
+    def get_records_with_timestamp(self,fname,short_names,starttime=None):
         for cg in self.get_channel_groups():
             #print(cg)
-            recs = cg.get_records_with_timestamp(fobj,foffset=self.data_block_ptr,short_names=short_names,starttime=starttime)
+            recs = cg.get_records_with_timestamp(fname=fname,foffset=self.data_block_ptr,short_names=short_names,starttime=starttime)
             if recs:
                 return recs
         return None
@@ -828,7 +828,7 @@ class dg_block(mdf_block):
             
 class cg_block(mdf_block):
     
-    def __init__(self,fobj,foffset,vers,bord,parent,ignore_channels=[],*args,**kwargs):
+    def __init__(self,fobj,foffset,vers,bord,ignore_channels=[],*args,**kwargs):
         """
         channel group block in the mdf file
         @param fobj: the file object
@@ -843,7 +843,7 @@ class cg_block(mdf_block):
         self.block_data.update(_interpret_cg_block(data=self.data,vers=vers,bord=bord))
 
         self.ignore_channels = ignore_channels#needed to filter out INCA related program SPAM
-        self.parent=parent
+        self.bord = bord
         self.records = []
         self.channels = []
         self.time_channel_idx = None
@@ -918,7 +918,7 @@ class cg_block(mdf_block):
         return None
     
     #this function needs to implement the binary data transformation    
-    def get_records_with_timestamp(self,fobj,foffset,short_names=None,starttime=None):
+    def get_records_with_timestamp(self,fname,foffset,short_names=None,starttime=None):
         rec_size = self.get_record_size()
         chs = self.get_channels()
         rec_num = self.get_number_of_records()
@@ -947,15 +947,19 @@ class cg_block(mdf_block):
                 
         time_channel_index = self.get_time_channel_index()
         
-        
         if foffset:
-            fobj.seek(foffset)
-            for rec_idx in range(rec_num):
-                rec = bytearray(fobj.read(rec_size))
-                vals = _interpret_record(rec=rec,chs=chs,bord=self.bord)
-                timestamp = vals.pop(time_channel_index)
-                ret = {timestamp:vals}
-                yield ret 
+            with open(fname,'rb') as f:
+                f.seek(foffset)
+                for rec_idx in range(rec_num):
+                    rec = bytearray(f.read(rec_size))
+                    vals = _interpret_record(rec=rec,chs=chs,bord=self.bord)
+                    timestamp = vals.pop(time_channel_index)
+                    
+                    if starttime:
+                        ret = {timestamp+starttime:vals}
+                    else:
+                        ret = {timestamp:vals}
+                    yield ret 
         else:
             return None
         
@@ -1250,9 +1254,7 @@ class mdf():
         return self.hdblock.get_channel_by_short_name(short_name=short_name)
 
     def get_records_with_timestamp(self,short_names=None,useabsolutetime=False):
-        with open(self.fname,'rb') as f:
-            #open the file again to retreive the records
-            return self.hdblock.get_records_with_timestamp(fobj=f,short_names=short_names,useabsolutetime=useabsolutetime)
+        return self.hdblock.get_records_with_timestamp(fname=self.fname,short_names=short_names,useabsolutetime=useabsolutetime)
 
 
     def to_csv_file(self,fname,useabsolutetime=False,csv_sep=",",line_sep=";\n"):
@@ -1284,10 +1286,13 @@ class mdf():
         records = self.get_records_with_timestamp(useabsolutetime=useabsolutetime)
         row_idx = 1
         for record in records:
+            
             for timestamp in record:
+                
                 thisrecord = record[timestamp]
+                
                 row = [timestamp,]
-                row.extend([thisrecord[chan] for chan in chans])
+                row.extend(thisrecord)
                 ws.append(row)
                 row_idx += 1
         

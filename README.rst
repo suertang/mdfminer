@@ -1,4 +1,4 @@
-mdfminer
+﻿mdfminer
 =======================
 
 The project's goal is to parse a "measurement data format" files (.mdf,.dat) and provide the contents in a useful manner.
@@ -23,11 +23,11 @@ ID Block
       Trigger Block(TimingInformation)(optional)
       CG Block(s)(Channel Group(s))(optional)
         CN Block(s)(Channel(s))(optional)
-          TX Block(Channel Comment)(optional)
-          TX Block(Unique Identifier)
-          CC Block(Channel Conversion Rule)(optional)
-          CD Block(Dependencies)(optional)
-          CE Block(Extentions)(optional)
+        TX Block(Channel Comment)(optional)
+        TX Block(Unique Identifier)
+        CC Block(Channel Conversion Rule)(optional)
+	CD Block(Dependencies)(optional)
+	CE Block(Extentions)(optional)
 
 How MDF works
 =============
@@ -44,7 +44,7 @@ How mdfminer works
 When loading a mdf file, the tree is read but the binary data is not touched yet.
 Parsing the tree is usually very fast since it only depends on the number of channels regardless on how long the measurement really is.
 
-Getting measurements from the mdf object  with get_records_with_timestamp() is done by a generator function, so the memory footprint and execution time is low until the next set of values is yield.
+Getting measurements from the mdf object  with "get_records_with_timestamp()" is done by a generator function, so the memory footprint and execution time is low until the next set of values is yield.
 A set of values is presented as a common python dictionary.
 
 
