@@ -1,6 +1,6 @@
 # mdf.py 
-# (C) 2016 Patrick Menschel
-# TODO Rewrite program to only convert raw data to physical values in the generator function, not in the DG constructor!
+# (C) 2017 Patrick Menschel
+
 
 import struct
 import datetime
@@ -1257,90 +1257,18 @@ class mdf():
         return self.hdblock.get_records_with_timestamp(fname=self.fname,short_names=short_names,useabsolutetime=useabsolutetime)
 
 
-    def to_csv_file(self,fname,useabsolutetime=False,csv_sep=",",line_sep=";\n"):
-        with open(fname,'w') as f:
-            chans = self.get_channel_short_names()
-            f.write("time"+csv_sep+csv_sep.join(chans)+line_sep)
-            records = self.get_records_with_timestamp(useabsolutetime=useabsolutetime)
-            
-            for record in records:
-                for timestamp in record:
-                    thisrecord = record[timestamp]
-                    f.write(str(timestamp)+csv_sep+csv_sep.join([str(thisrecord[chan]) for chan in chans])+line_sep)
-        return
-                        
-    def to_xlsx_file(self,fname,useabsolutetime=False):
-        from openpyxl import Workbook
-        from openpyxl.chart import (
-                                    LineChart,
-                                    Reference,
-                                    )
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "data"
-        row = ["time",]
-        chans = self.get_channel_short_names()
-        col_idx = len(chans)+1
-        row.extend(chans)
-        ws.append(row)
-        records = self.get_records_with_timestamp(useabsolutetime=useabsolutetime)
-        row_idx = 1
-        for record in records:
-            
-            for timestamp in record:
-                
-                thisrecord = record[timestamp]
-                
-                row = [timestamp,]
-                row.extend(thisrecord)
-                ws.append(row)
-                row_idx += 1
-        
-        c1 = LineChart()
-        c1.title = "Line Chart"
-        c1.style = 13
-        c1.y_axis.title = 'Value'
-        c1.x_axis.title = 'Record'
-
-        print(col_idx,row_idx)
-        data = Reference(ws, min_col=2, min_row=1, max_col=col_idx, max_row=row_idx)
-        c1.add_data(data, titles_from_data=True)
-        ws2 = wb.create_sheet("Chart")
-        ws2.add_chart(c1, "A1")
-        wb.save(fname)
-        return
-                        
-
-
-    def to_elementtree(self):
-        #Tree Structure of MDF File, realize this with Elementtree
-        #ID Block
-        #  HD Block
-        #    TX Block(File comment)(optional)
-        #    PR Block(Program Specific Data)(optional)
-        #    DG Block(Data Group)
-        #      Data Record(binary)
-        #      Trigger Block(TimingInformation)(optional)
-        #      CG Block(s)(Channel Group(s))(optional)
-        #        CN Block(s)(Channel(s))(optional)
-        #          TX Block(Channel Comment)(optional)
-        #          TX Block(unique identifier)
-        #          CG Block(Conversion Rule)(optional)
-        #          CD Block(Dependencies)(optional)
-        #          CE Block(Extentions)(optional)
-        #    ...
-        pass
-
+    
 
 def selftest(testmode="read_mdf",fname="test.mdf"):
+    from mdftools import to_csv_file,to_xlsx_file
     if testmode == "mdf2csv":
         a = mdf(fname=fname)
         c = fname[:-3] + "csv" 
-        a.to_csv_file(c,useabsolutetime=True)
+        to_csv_file(a,c,useabsolutetime=True)
     elif testmode == "mdf2xlsx":
         a = mdf(fname=fname)
         c = fname[:-3] + "xlsx" 
-        a.to_xlsx_file(c,useabsolutetime=True)
+        to_xlsx_file(a,c,useabsolutetime=True)
         
 
     return
