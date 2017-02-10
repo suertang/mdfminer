@@ -6,7 +6,7 @@ import struct
 import datetime
 
 
-MDF_IMPLEMENTED_VERSION = 3.0
+MDF_IMPLEMENTED_VERSION = 3.3
 
 
 def get_implemented_mdf_version():

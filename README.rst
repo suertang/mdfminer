@@ -48,4 +48,23 @@ Getting measurements from the mdf object  with "get_records_with_timestamp()" is
 A set of values is presented as a common python dictionary.
 
 
+Usage
+=====
+#import the module
+>>> import mdfminer
+
+#create an mdf object from a recorder file
+>>> m = mdfminer.mdf(fname=r"c:\Recorder1-001.mdf")
+
+#retrieve file version
+>>> print(m.version)
+3.1
+
+#you can dump the data into an xlsx file, although it is not recommended practice for data analysis
+>>> mdfminer.to_xlsx_file(m,r"c:\recorder.xlsx",useabsolutetime=True)
+
+
+#recommended practice for data analysis would be feeding the generator data to your own program 
+>>> for rec in m.get_records_with_timestamp(useabsolutetime=True):
+        analyze_data(rec)
 
