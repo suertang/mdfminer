@@ -381,7 +381,7 @@ def _interpret_ce_block(data,vers=3.0,bord='little'):
                19:"Vector CAN",
                }
     et_raw = struct.unpack("{0}H".format(fmtprefix),data[4:6])[0]
-    et = et_dict[et_raw]
+    et = et_dict.get(et_raw)
     ret = {"extention_type":et,
            }
     if et == 'DIM':
