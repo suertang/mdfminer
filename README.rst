@@ -15,19 +15,19 @@ Tree Structure of MDF File
 ==========================
 
 ID Block
-__HD Block
-____TX Block(File comment)(optional)
-____PR Block(Program Specific Data)(optional)
-____DG Block(Data Group)
-______Data Record(binary)
-______Trigger Block(TimingInformation)(optional)
-______CG Block(s)(Channel Group(s))(optional)
-________CN Block(s)(Channel(s))(optional)
-________TX Block(Channel Comment)(optional)
-________TX Block(Unique Identifier)
-________CC Block(Channel Conversion Rule)(optional)
-________CD Block(Dependencies)(optional)
-________CE Block(Extentions)(optional)
+--HD Block
+----TX Block(File comment)(optional)
+----PR Block(Program Specific Data)(optional)
+----DG Block(Data Group)
+------Data Record(binary)
+------Trigger Block(TimingInformation)(optional)
+------CG Block(s)(Channel Group(s))(optional)
+--------CN Block(s)(Channel(s))(optional)
+--------TX Block(Channel Comment)(optional)
+--------TX Block(Unique Identifier)
+--------CC Block(Channel Conversion Rule)(optional)
+--------CD Block(Dependencies)(optional)
+--------CE Block(Extentions)(optional)
 
 How MDF works
 =============
