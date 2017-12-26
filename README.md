@@ -11,7 +11,7 @@ The mdf file format consists of a tree like structure to describe the contents r
 to the file offset of the next block.
 
 ## Tree Structure of MDF File
-'''
+```
 ID Block
   HD Block
     TX Block(File comment)(optional)
@@ -26,7 +26,7 @@ ID Block
         CC Block(Channel Conversion Rule)(optional)
         CD Block(Dependencies)(optional)
         CE Block(Extentions)(optional)
-'''
+```
 ## How MDF works
 
 The measurement data is in the Data Record of the DG Block presenting an array of records.
